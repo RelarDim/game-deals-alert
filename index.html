@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Deals</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #6a737d; --line: #e3e6ea;
+    --accent: #1a7f37; --accent-bg: #e6f4ea; --link: #0b5fd6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --card: #171b21; --text: #e6e9ed; --muted: #8b95a1; --line: #262c34;
+      --accent: #4ade80; --accent-bg: #12301d; --link: #6cb0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+             gap: 12px; background: var(--card); border: 1px solid var(--line);
+             border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  label b { color: var(--text); font-weight: 600; }
+  input, select { font: inherit; color: var(--text); background: var(--bg);
+                  border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
+  .status { color: var(--muted); font-size: 13px; margin: 0 2px 10px; }
+  .row { display: grid; grid-template-columns: 120px 1fr auto; gap: 14px; align-items: center;
+         background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+         padding: 10px 14px 10px 10px; margin-bottom: 8px; }
+  .row img { width: 120px; height: 56px; object-fit: cover; border-radius: 6px; background: var(--line); }
+  .t { font-weight: 600; }
+  .t a { color: var(--text); text-decoration: none; }
+  .t a:hover { color: var(--link); text-decoration: underline; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .price { text-align: right; white-space: nowrap; }
+  .pct { display: inline-block; background: var(--accent-bg); color: var(--accent);
+         font-weight: 700; border-radius: 6px; padding: 2px 8px; margin-bottom: 2px; }
+  .old { color: var(--muted); text-decoration: line-through; font-size: 13px; margin-left: 6px; }
+  .new { font-weight: 700; font-size: 16px; }
+  h2 { font-size: 18px; margin: 0 0 10px; }
+  .err { color: #c62828; }
+  @media (max-width: 560px) {
+    .row { grid-template-columns: 84px 1fr; }
+    .row img { width: 84px; height: 44px; }
+    .price { grid-column: 1 / -1; text-align: left; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>PC Deals</h1>
+  <p class="sub"><span id="sources">…</span><br><span id="updated"></span></p>
+
+  <div class="filters">
+    <label>Ελάχιστη έκπτωση: <b id="vDisc">40%</b>
+      <input type="range" id="disc" min="10" max="95" step="5" value="40"></label>
+    <label>Μέγιστη τιμή: <b id="vPrice">€ 30</b>
+      <input type="range" id="price" min="0" max="80" step="1" value="30"></label>
+    <label>Ελάχιστη βαθμολογία Steam: <b id="vRate">70%</b>
+      <input type="range" id="rate" min="0" max="95" step="5" value="70"></label>
+    <label>Κατάστημα
+      <select id="store"><option value="">Όλα</option></select></label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cheapest" checked> Φθηνότερο κατάστημα ανά παιχνίδι</label>
+    <label>Αναζήτηση
+      <input id="q" type="search" placeholder="όνομα παιχνιδιού"></label>
+    <label>Ταξινόμηση
+      <select id="sort">
+        <option value="savings">Μεγαλύτερη έκπτωση</option>
+        <option value="price">Φθηνότερα</option>
+        <option value="rating">Καλύτερη βαθμολογία</option>
+      </select></label>
+  </div>
+
+  <p class="status" id="status">Φόρτωση…</p>
+  <div id="list"></div>
+  <div id="free" style="margin-top:28px"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const eur = n => "€" + Number(n).toFixed(2).replace(".", ",");
+const norm = t => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+let deals = [], free = [];
+
+async function load() {
+  try {
+    const d = await (await fetch("deals.json", { cache: "no-cache" })).json();
+    deals = d.deals; free = d.free || [];
+    const when = new Date(d.updated);
+    $("updated").textContent = "Τελευταία ενημέρωση: " + when.toLocaleString("el-GR");
+    const counts = {};
+    deals.forEach(x => counts[x.store] = (counts[x.store] || 0) + 1);
+    Object.keys(counts).sort().forEach(s =>
+      $("store").insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
+    $("sources").textContent = Object.keys(counts).length + " καταστήματα: " + Object.keys(counts).sort().join(", ");
+    renderFree();
+    render();
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">Δεν φορτώθηκαν τα δεδομένα (${esc(e.message)}).</span>`;
+  }
+}
+
+function renderFree() {
+  if (!free.length) return;
+  $("free").innerHTML = "<h2>Δωρεάν τώρα</h2>" + free.map(g => `
+    <div class="row"><img loading="lazy" src="${esc(g.img)}" alt="">
+      <div><div class="t"><a href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.title)}</a></div>
+        <div class="meta">${esc(g.store)}${g.ends ? " · λήγει " + esc(g.ends.slice(0, 10)) : ""}</div></div>
+      <div class="price"><span class="pct">ΔΩΡΕΑΝ</span>${g.worth ? `<br><span class="old">${eur(g.worth)}</span>` : ""}</div></div>`).join("");
+}
+
+function render() {
+  const minD = +$("disc").value, maxP = +$("price").value, minR = +$("rate").value;
+  const store = $("store").value, q = $("q").value.trim().toLowerCase(), sort = $("sort").value;
+  $("vDisc").textContent = minD + "%";
+  $("vPrice").textContent = maxP >= 80 ? "χωρίς όριο" : "€" + maxP;
+  $("vRate").textContent = minR === 0 ? "όλα" : minR + "%";
+
+  let r = deals.filter(d =>
+    d.disc >= minD && (maxP >= 80 || d.price <= maxP) && (minR === 0 || (d.rating || 0) >= minR) &&
+    (!store || d.store === store) && (!q || d.title.toLowerCase().includes(q)));
+  if ($("cheapest").checked) {
+    const best = new Map();
+    r.forEach(d => { const k = norm(d.title), c = best.get(k); if (!c || d.price < c.price) best.set(k, d); });
+    r = [...best.values()];
+  }
+  const key = { savings: d => -d.disc, price: d => d.price, rating: d => -(d.rating || 0) };
+  r.sort((a, b) => key[sort](a) - key[sort](b));
+
+  $("status").textContent = `${r.length} προσφορές (από ${deals.length}). Τιμές σε ευρώ.`;
+  $("list").innerHTML = r.slice(0, 200).map(d => {
+    const rating = d.rating ? `${d.rating}% θετικές${d.reviews ? " · " + d.reviews.toLocaleString("el-GR") + " κριτικές" : ""}` : "χωρίς βαθμολογία";
+    return `<div class="row">
+      <img loading="lazy" src="${esc(d.img)}" alt="">
+      <div><div class="t"><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a></div>
+        <div class="meta">${esc(d.store)} · ${rating}</div></div>
+      <div class="price"><span class="pct">-${d.disc}%</span><br>
+        <span class="new">${eur(d.price)}</span>${d.orig ? `<span class="old">${eur(d.orig)}</span>` : ""}</div>
+    </div>`;
+  }).join("");
+}
+
+["disc", "price", "rate", "store", "q", "sort", "cheapest"].forEach(id => $(id).addEventListener("input", render));
+load();
+</script>
+</body>
+</html>
