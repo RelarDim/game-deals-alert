@@ -44,6 +44,7 @@
   .old { color: var(--muted); text-decoration: line-through; font-size: 13px; margin-left: 6px; }
   .new { font-weight: 700; font-size: 16px; }
   h2 { font-size: 18px; margin: 0 0 10px; }
+  .warn { color: #b26a00; font-weight: 600; }
   .err { color: #c62828; }
   @media (max-width: 560px) {
     .row { grid-template-columns: 84px 1fr; }
@@ -66,6 +67,7 @@
       <input type="range" id="rate" min="0" max="95" step="5" value="70"></label>
     <label>Κατάστημα
       <select id="store"><option value="">Όλα</option></select></label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="safe" checked> Μόνο καταστήματα που πουλούν Ελλάδα</label>
     <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="cheapest" checked> Φθηνότερο κατάστημα ανά παιχνίδι</label>
     <label>Αναζήτηση
       <input id="q" type="search" placeholder="όνομα παιχνιδιού"></label>
@@ -88,6 +90,10 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 const eur = n => "€" + Number(n).toFixed(2).replace(".", ",");
 const norm = t => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 let deals = [], free = [];
+// Καταστήματα που πουλούν κανονικά στην Ελλάδα (λογαριασμός/επίσημο κατάστημα ή γνωστοί ευρωπαϊκοί έμποροι).
+// Τα υπόλοιπα είναι μεταπωλητές keys ή US καταστήματα και μπορεί να έχουν περιορισμό περιοχής.
+const SAFE = new Set(["Steam", "GOG", "Epic Games Store", "Humble Store", "Fanatical", "GreenManGaming",
+                      "Gamesplanet", "Gamesload", "GamersGate"]);
 
 async function load() {
   try {
@@ -125,7 +131,7 @@ function render() {
 
   let r = deals.filter(d =>
     d.disc >= minD && (maxP >= 80 || d.price <= maxP) && (minR === 0 || (d.rating || 0) >= minR) &&
-    (!store || d.store === store) && (!q || d.title.toLowerCase().includes(q)));
+    (!store || d.store === store) && (!$("safe").checked || SAFE.has(d.store)) && (!q || d.title.toLowerCase().includes(q)));
   if ($("cheapest").checked) {
     const best = new Map();
     r.forEach(d => { const k = norm(d.title), c = best.get(k); if (!c || d.price < c.price) best.set(k, d); });
@@ -140,14 +146,14 @@ function render() {
     return `<div class="row">
       <img loading="lazy" src="${esc(d.img)}" alt="">
       <div><div class="t"><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a></div>
-        <div class="meta">${esc(d.store)} · ${rating}</div></div>
+        <div class="meta">${esc(d.store)}${SAFE.has(d.store) ? "" : ' <span class="warn">⚠ έλεγξε περιοχή</span>'} · ${rating}</div></div>
       <div class="price"><span class="pct">-${d.disc}%</span><br>
         <span class="new">${eur(d.price)}</span>${d.orig ? `<span class="old">${eur(d.orig)}</span>` : ""}</div>
     </div>`;
   }).join("");
 }
 
-["disc", "price", "rate", "store", "q", "sort", "cheapest"].forEach(id => $(id).addEventListener("input", render));
+["disc", "price", "rate", "store", "q", "sort", "cheapest", "safe"].forEach(id => $(id).addEventListener("input", render));
 load();
 </script>
 </body>
