@@ -9,11 +9,19 @@ OUT = Path(__file__).with_name("deals.json")
 UA = "Mozilla/5.0 (compatible; PersonalDealsPage/1.0; hobby project)"
 
 
-def get(url, as_json=True):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en"})
-    with urllib.request.urlopen(req, timeout=40) as r:
-        body = r.read().decode("utf8", "replace")
-    return json.loads(body) if as_json else body
+def get(url, as_json=True, tries=4):
+    last = None
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en"})
+            with urllib.request.urlopen(req, timeout=40) as r:
+                body = r.read().decode("utf8", "replace")
+            return json.loads(body) if as_json else body
+        except Exception as e:  # 429 / 5xx / timeout: περιμένουμε και ξαναδοκιμάζουμε
+            last = e
+            print(f"  retry {attempt + 1}/{tries} {url[:80]} -> {e!r}")
+            time.sleep(3 * (attempt + 1))
+    raise last
 
 
 def safe(fn, name):
@@ -88,6 +96,7 @@ def cheapshark(usd_eur):
     ids = [s["storeID"] for s in all_stores if s["isActive"] and s["storeName"] not in ("Steam", "GOG")]
     out = []
     for sid in ids:
+      try:
         for page in range(4):
             rows = get("https://www.cheapshark.com/api/1.0/deals?onSale=1&sortBy=Savings&storeID=%s"
                        "&pageSize=60&pageNumber=%d" % (sid, page))
@@ -105,7 +114,10 @@ def cheapshark(usd_eur):
                 })
             if len(rows) < 60:
                 break
-            time.sleep(0.4)
+            time.sleep(1)
+      except Exception as e:
+        print(f"cheapshark store {sid} skipped: {e!r}")
+      time.sleep(1)
     return out
 
 
@@ -127,6 +139,23 @@ def main():
     rate = get("https://api.frankfurter.app/latest?from=USD&to=EUR")["rates"]["EUR"]
     deals = safe(steam, "steam") + safe(gog, "gog") + safe(lambda: cheapshark(rate), "cheapshark")
     free = safe(lambda: free_games(rate), "free")
+    try:
+        old = json.loads(OUT.read_text())
+    except Exception:
+        old = {"deals": [], "free": []}
+    have = {d["store"] for d in deals}
+    for name in ("Steam", "GOG"):
+        if name not in have:
+            print(f"{name} missing, keeping previous data")
+            deals += [d for d in old["deals"] if d["store"] == name]
+    if not any(d["store"] not in ("Steam", "GOG") for d in deals):
+        print("cheapshark stores missing, keeping previous data")
+        deals += [d for d in old["deals"] if d["store"] not in ("Steam", "GOG")]
+    else:  # κρατάμε και κάθε μεμονωμένο κατάστημα του CheapShark που έλειψε αυτή τη φορά
+        have = {d["store"] for d in deals}
+        deals += [d for d in old["deals"] if d["store"] not in have]
+    if not free:
+        free = old.get("free", [])
     if not deals:  # αν όλα απέτυχαν, κρατάμε το προηγούμενο αρχείο
         raise SystemExit("no deals fetched, keeping old file")
     OUT.write_text(json.dumps({
