@@ -46,6 +46,20 @@
   h2 { font-size: 18px; margin: 0 0 10px; }
   .warn { color: #b26a00; font-weight: 600; }
   .err { color: #c62828; }
+  .finder { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+            padding: 14px; margin-bottom: 18px; }
+  .finder h2 { margin: 0 0 8px; }
+  .finder input[type=search] { width: 100%; font-size: 16px; padding: 10px 12px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .game { cursor: pointer; }
+  .game:hover { border-color: var(--link); }
+  .offers { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+            padding: 6px 14px; margin: -2px 0 10px; }
+  .offer { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0;
+           border-bottom: 1px solid var(--line); }
+  .offer:last-child { border-bottom: 0; }
+  .offer a { color: var(--link); text-decoration: none; font-weight: 600; }
+  .best { color: var(--accent); font-weight: 700; }
   @media (max-width: 560px) {
     .row { grid-template-columns: 84px 1fr; }
     .row img { width: 84px; height: 44px; }
@@ -58,6 +72,14 @@
   <h1>PC Deals</h1>
   <p class="sub"><span id="sources">…</span><br><span id="updated"></span></p>
 
+  <div class="finder">
+    <h2>Βρες το φθηνότερο για οποιοδήποτε παιχνίδι</h2>
+    <input id="find" type="search" placeholder="π.χ. Resident Evil Requiem" autocomplete="off">
+    <p class="hint">Ψάχνει σε όλα τα καταστήματα, ακόμα κι αν δεν έχει έκπτωση. Οι τιμές είναι από δολάρια σε ευρώ (προσεγγιστικά).</p>
+    <div id="found" style="margin-top:12px"></div>
+  </div>
+
+  <h2>Εκπτώσεις τώρα</h2>
   <div class="filters">
     <label>Ελάχιστη έκπτωση: <b id="vDisc">40%</b>
       <input type="range" id="disc" min="10" max="95" step="5" value="40"></label>
@@ -152,6 +174,62 @@ function render() {
     </div>`;
   }).join("");
 }
+
+// ---- Αναζήτηση φθηνότερης τιμής για οποιοδήποτε παιχνίδι (CheapShark, ζωντανά) ----
+const CS = "https://www.cheapshark.com/api/1.0";
+let usdEur = 0.89, storeNames = null, findTimer = 0, findSeq = 0;
+const usd = n => eur(Number(n) * usdEur);
+
+async function initFinder() {
+  try {
+    const [st, fx] = await Promise.all([
+      fetch(CS + "/stores").then(r => r.json()),
+      fetch("https://api.frankfurter.app/latest?from=USD&to=EUR").then(r => r.json()).catch(() => null)]);
+    storeNames = Object.fromEntries(st.map(x => [x.storeID, x.storeName]));
+    if (fx && fx.rates) usdEur = fx.rates.EUR;
+  } catch (e) { storeNames = {}; }
+}
+
+async function findGames() {
+  const q = $("find").value.trim(), seq = ++findSeq;
+  if (q.length < 3) { $("found").innerHTML = ""; return; }
+  $("found").innerHTML = '<span class="hint">Αναζήτηση…</span>';
+  try {
+    if (!storeNames) await initFinder();
+    const r = await fetch(`${CS}/games?title=${encodeURIComponent(q)}&limit=12`).then(r => r.json());
+    if (seq !== findSeq) return;
+    if (!r.length) { $("found").innerHTML = '<span class="hint">Δεν βρέθηκε. Δοκίμασε πιο σύντομο όνομα.</span>'; return; }
+    $("found").innerHTML = r.map(g => `
+      <div class="row game" data-id="${esc(g.gameID)}"><img loading="lazy" src="${esc(g.thumb)}" alt="">
+        <div><div class="t">${esc(g.external)}</div><div class="meta">πάτα για όλες τις τιμές</div></div>
+        <div class="price"><span class="meta">από</span> <span class="new">${usd(g.cheapest)}</span></div></div>
+      <div class="offers" id="o${esc(g.gameID)}" hidden></div>`).join("");
+  } catch (e) {
+    if (seq === findSeq) $("found").innerHTML = `<span class="err">Σφάλμα αναζήτησης (${esc(e.message)}).</span>`;
+  }
+}
+
+async function showOffers(id) {
+  const box = $("o" + id);
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false; box.innerHTML = '<span class="hint">Φόρτωση…</span>';
+  try {
+    const d = await fetch(`${CS}/games?id=${encodeURIComponent(id)}`).then(r => r.json());
+    const offers = d.deals.slice().sort((a, b) => a.price - b.price);
+    const low = d.cheapestPriceEver ? `<div class="hint">Ιστορικό χαμηλό: ${usd(d.cheapestPriceEver.price)}</div>` : "";
+    box.innerHTML = offers.map((o, i) => {
+      const name = storeNames[o.storeID] || "Κατάστημα " + o.storeID;
+      const warn = SAFE.has(name) ? "" : ' <span class="warn">⚠ έλεγξε περιοχή</span>';
+      const sale = +o.savings >= 1 ? ` <span class="old">${usd(o.retailPrice)}</span> <span class="pct">-${Math.round(o.savings)}%</span>` : "";
+      return `<div class="offer"><span><a href="${CS.replace("/api/1.0", "")}/redirect?dealID=${encodeURIComponent(o.dealID)}" target="_blank" rel="noopener">${esc(name)}</a>${warn}</span>
+        <span class="${i === 0 ? "best" : ""}">${usd(o.price)}${sale}</span></div>`;
+    }).join("") + low;
+  } catch (e) { box.innerHTML = `<span class="err">Σφάλμα (${esc(e.message)}).</span>`; }
+}
+
+$("find").addEventListener("input", () => { clearTimeout(findTimer); findTimer = setTimeout(findGames, 400); });
+$("found").addEventListener("click", e => { const g = e.target.closest(".game"); if (g && !e.target.closest("a")) showOffers(g.dataset.id); });
+initFinder();
 
 ["disc", "price", "rate", "store", "q", "sort", "cheapest", "safe"].forEach(id => $(id).addEventListener("input", render));
 load();
