@@ -52,6 +52,7 @@
   .finder input[type=search] { width: 100%; font-size: 16px; padding: 10px 12px; }
   .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .game { cursor: pointer; }
+  .all { color: var(--link); text-decoration: none; }
   .game:hover { border-color: var(--link); }
   .offers { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
             padding: 6px 14px; margin: -2px 0 10px; }
@@ -199,11 +200,15 @@ async function findGames() {
     const r = await fetch(`${CS}/games?title=${encodeURIComponent(q)}&limit=12`).then(r => r.json());
     if (seq !== findSeq) return;
     if (!r.length) { $("found").innerHTML = '<span class="hint">Δεν βρέθηκε. Δοκίμασε πιο σύντομο όνομα.</span>'; return; }
-    $("found").innerHTML = r.map(g => `
-      <div class="row game" data-id="${esc(g.gameID)}"><img loading="lazy" src="${esc(g.thumb)}" alt="">
-        <div><div class="t">${esc(g.external)}</div><div class="meta">πάτα για όλες τις τιμές</div></div>
+    $("found").innerHTML = r.map(g => {
+      const buy = `https://www.cheapshark.com/redirect?dealID=${g.cheapestDealID}`;
+      return `
+      <div class="row game"><img loading="lazy" src="${esc(g.thumb)}" alt="">
+        <div><div class="t"><a href="${buy}" target="_blank" rel="noopener">${esc(g.external)} ↗</a></div>
+          <div class="meta">άνοιγμα στο φθηνότερο κατάστημα · <a class="all" href="#" data-id="${esc(g.gameID)}">όλες οι τιμές ▾</a></div></div>
         <div class="price"><span class="meta">από</span> <span class="new">${usd(g.cheapest)}</span></div></div>
-      <div class="offers" id="o${esc(g.gameID)}" hidden></div>`).join("");
+      <div class="offers" id="o${esc(g.gameID)}" hidden></div>`;
+    }).join("");
   } catch (e) {
     if (seq === findSeq) $("found").innerHTML = `<span class="err">Σφάλμα αναζήτησης (${esc(e.message)}).</span>`;
   }
@@ -228,7 +233,12 @@ async function showOffers(id) {
 }
 
 $("find").addEventListener("input", () => { clearTimeout(findTimer); findTimer = setTimeout(findGames, 400); });
-$("found").addEventListener("click", e => { const g = e.target.closest(".game"); if (g && !e.target.closest("a")) showOffers(g.dataset.id); });
+$("found").addEventListener("click", e => {
+  const all = e.target.closest(".all");
+  if (all) { e.preventDefault(); showOffers(all.dataset.id); return; }
+  const g = e.target.closest(".game");
+  if (g && !e.target.closest("a")) g.querySelector(".t a").click();
+});
 initFinder();
 
 ["disc", "price", "rate", "store", "q", "sort", "cheapest", "safe"].forEach(id => $(id).addEventListener("input", render));
