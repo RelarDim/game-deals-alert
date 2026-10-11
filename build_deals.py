@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 OUT = Path(__file__).with_name("deals.json")
-UA = "Mozilla/5.0 (compatible; PersonalDealsPage/1.0; hobby project)"
+UA = "GameDealsPage/1.0 (+https://github.com/RelarDim/game-deals-alert)"
 
 
 def get(url, as_json=True, tries=4):
@@ -19,7 +19,13 @@ def get(url, as_json=True, tries=4):
             return json.loads(body) if as_json else body
         except Exception as e:  # 429 / 5xx / timeout: περιμένουμε και ξαναδοκιμάζουμε
             last = e
-            print(f"  retry {attempt + 1}/{tries} {url[:80]} -> {e!r}")
+            detail = ""
+            if hasattr(e, "read"):  # τυπώνουμε το μήνυμα του server (π.χ. γιατί 400)
+                try:
+                    detail = " body=" + e.read().decode("utf8", "replace")[:300]
+                except Exception:
+                    pass
+            print(f"  retry {attempt + 1}/{tries} {url[:80]} -> {e!r}{detail}")
             time.sleep(3 * (attempt + 1))
     raise last
 
